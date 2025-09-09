@@ -53,8 +53,15 @@ local Camera = workspace.CurrentCamera
 
 local function getfile(name)
     -- Use local files instead of GitHub
+    if not isfile(name) then
+        print("File not found: " .. name)
+        return ""
+    end
     local success, content = pcall(readfile, name)
-    if success then return content else return print("getfile returned error \""..content.."\"") end
+    if success then return content else 
+        print("getfile returned error \""..content.."\"")
+        return ""
+    end
 end
 local function isswimhubfile(file)
     return isfile("swimhub/new/files/"..file)
@@ -80,13 +87,27 @@ do
     if not isfolder("swimhub/new/files") then makefolder("swimhub/new/files") end
     -- Load local assets instead of downloading
     local gotassets = getfile("assets.json")
-    local assets = HttpService:JSONDecode(gotassets)
+    local assets
+    if gotassets == "" then
+        print("assets.json not found, using default list")
+        assets = {version = "0.0.5c", list = {"library_main.lua", "library_theme.lua", "library_save.lua", "chat_spam.lua"}}
+    else
+        assets = HttpService:JSONDecode(gotassets)
+    end
     
     -- Copy local files to swimhub folder for compatibility
     local function copyfiles(list)
         for _, file in list do
-            if isfile(file) then
-                writefile("swimhub/new/files/"..file, readfile(file))
+            if isfile(file) and not isfolder(file) then
+                local success, content = pcall(readfile, file)
+                if success then
+                    writefile("swimhub/new/files/"..file, content)
+                    print("Copied: " .. file)
+                else
+                    print("Failed to read: " .. file)
+                end
+            else
+                print("Skipping (not a file): " .. file)
             end
         end
     end
