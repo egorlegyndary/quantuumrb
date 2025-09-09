@@ -5,6 +5,16 @@ return function(utility)
     local plrs = cloneref(game:GetService("Players"))
     local lplr = plrs.LocalPlayer
     local container = Instance.new("Folder", game:GetService("CoreGui").RobloxGui)
+    
+    -- ОПТИМИЗАЦИЯ: кэш для часто используемых значений
+    local cache = {
+        camera = nil,
+        last_camera_update = 0,
+        frame_count = 0,
+        update_interval = 3, -- Обновляем каждые 3 кадра вместо каждого
+        distance_cache = {},
+        last_distance_update = 0
+    }
     if not utility then
         utility = {
             connections = {
@@ -233,7 +243,8 @@ return function(utility)
                 head = nil,
                 cache = {},
                 cache_children = 0,
-                character = nil
+                character = nil,
+                last_update = 0
             },
             chams_object = Instance.new("Highlight", container),
             plr_instance = player
@@ -242,27 +253,68 @@ return function(utility)
             loaded_plrs[player].obj["skeleton_" .. required] = esp.create_obj("Line", { Visible = false })
         end
         local plr = loaded_plrs[player]
-        plr.connection = utility.new_renderstepped(function(delta)
+        -- ОПТИМИЗАЦИЯ: Используем Heartbeat вместо RenderStepped
+        plr.connection = utility.new_heartbeat(function(delta)
+            cache.frame_count = cache.frame_count + 1
+            
+            -- Обновляем только каждые N кадров для экономии ресурсов
+            if cache.frame_count % cache.update_interval ~= 0 then return end
+            
             local plr = loaded_plrs[player]
-            -- setup
-            camera = workspace.CurrentCamera
+            if not plr then return end
+            
+            -- ОПТИМИЗАЦИЯ: кэшируем камеру
+            local camera = workspace.CurrentCamera
             if not camera then return end
             local obj = plr.obj
             local esp = plr.esp
             local main_settings = esp_table.main_settings
-            if settings.enabled and
-                (main_settings.teamcheck and lplr.Team ~= player.Team or not main_settings.teamcheck) and
-                (player.Character and player.Character:FindFirstChild("Head")) then
+            -- ОПТИМИЗАЦИЯ: Ранний выход если ESP отключен
+            if not settings.enabled then
+                for _, v in obj do v.Visible = false end
+                plr.chams_object.Enabled = false
+                return
+            end
+            
+            -- Проверка команды
+            if main_settings.teamcheck and lplr.Team == player.Team then
+                for _, v in obj do v.Visible = false end
+                plr.chams_object.Enabled = false
+                return
+            end
+            
+            -- Проверка персонажа
+            if not player.Character or not player.Character:FindFirstChild("Head") then
+                for _, v in obj do v.Visible = false end
+                plr.chams_object.Enabled = false
+                return
+            end
+            
+            if player.Character and player.Character:FindFirstChild("Head") then
                 esp.character = player.Character
                 local humanoid = esp.character:FindFirstChildOfClass("Humanoid")
                 esp.head = esp.character:FindFirstChild("Head")
+                
+                if not esp.head then return end
+                
                 local _, onScreen = worldToScreen(esp.head.Position)
                 esp.onscreen = onScreen
-                if esp.onscreen then
+                
+                if not esp.onscreen then
+                    for _, v in obj do v.Visible = false end
+                    plr.chams_object.Enabled = false
+                    return
+                end
+                
+                -- ОПТИМИЗАЦИЯ: Обновляем данные только если нужно
+                local now = tick()
+                if not esp.last_update or now - esp.last_update > 0.1 then -- Обновляем данные каждые 100мс
                     esp.distance = (camera.CFrame.p - esp.head.Position).Magnitude
                     esp.health = humanoid and humanoid.Health or 0
                     esp.max_health = humanoid and humanoid.MaxHealth or 1
                     esp.alive = humanoid and humanoid.Health > 0 or false
+                    esp.last_update = now
+                end
                     do
                         local cache = {}
                         for i = 1, #esp.character:GetChildren() do
