@@ -11,7 +11,7 @@ return function(utility)
         camera = nil,
         last_camera_update = 0,
         frame_count = 0,
-        update_interval = 3, -- Обновляем каждые 3 кадра вместо каждого
+        update_interval = 3, -- Обновляем каждые N кадров вместо каждого (ниже динамически)
         distance_cache = {},
         last_distance_update = 0
     }
@@ -116,6 +116,12 @@ return function(utility)
         }
     }
     local loaded_plrs = {}
+
+    local function count_loaded_players()
+        local count = 0
+        for _ in next, loaded_plrs do count += 1 end
+        return count
+    end
     -- (please update me) vars
     local camera = workspace.CurrentCamera
     local viewportsize = camera.ViewportSize
@@ -246,7 +252,7 @@ return function(utility)
                 character = nil,
                 last_update = 0
             },
-            chams_object = Instance.new("Highlight", container),
+            chams_object = nil,
             plr_instance = player
         }
         for required, _ in next, skeleton_order do
@@ -269,24 +275,30 @@ return function(utility)
             local obj = plr.obj
             local esp = plr.esp
             local main_settings = esp_table.main_settings
+            -- Динамическая регулировка частоты обновления (больше игроков → реже обновляем)
+            if cache.frame_count % 30 == 0 then
+                local total = count_loaded_players()
+                -- от 2 до 6 кадров: до 8 игроков — каждые 2 кадра, 9-16 — 3-4, 17+ — 5-6
+                cache.update_interval = math.clamp(2 + math.floor((total) / 8), 2, 6)
+            end
             -- ОПТИМИЗАЦИЯ: Ранний выход если ESP отключен
             if not settings.enabled then
                 for _, v in obj do v.Visible = false end
-                plr.chams_object.Enabled = false
+                if plr.chams_object then plr.chams_object.Enabled = false end
                 return
             end
             
             -- Проверка команды
             if main_settings.teamcheck and lplr.Team == player.Team then
                 for _, v in obj do v.Visible = false end
-                plr.chams_object.Enabled = false
+                if plr.chams_object then plr.chams_object.Enabled = false end
                 return
             end
             
             -- Проверка персонажа
             if not player.Character or not player.Character:FindFirstChild("Head") then
                 for _, v in obj do v.Visible = false end
-                plr.chams_object.Enabled = false
+                if plr.chams_object then plr.chams_object.Enabled = false end
                 return
             end
             
@@ -302,7 +314,7 @@ return function(utility)
                 
                 if not esp.onscreen then
                     for _, v in obj do v.Visible = false end
-                    plr.chams_object.Enabled = false
+                    if plr.chams_object then plr.chams_object.Enabled = false end
                     return
                 end
                 
@@ -315,15 +327,29 @@ return function(utility)
                     esp.alive = humanoid and humanoid.Health > 0 or false
                     esp.last_update = now
                 end
-                    do
-                        local cache = {}
-                        for i = 1, #esp.character:GetChildren() do
-                            local part = esp.character:GetChildren()[i]
+                    -- Ограничение по дистанции (ранний выход)
+                    if main_settings.distancelimit and esp.distance and esp.distance > (main_settings.maxdistance or 200) then
+                        for _, v in obj do v.Visible = false end
+                        if plr.chams_object then plr.chams_object.Enabled = false end
+                        return
+                    end
+
+                    -- Кэш частей персонажа: пересчитываем только при изменении детей
+                    local children = esp.character:GetChildren()
+                    if not esp.cache or esp.cache_children ~= #children then
+                        esp.cache = {}
+                        for i = 1, #children do
+                            local part = children[i]
                             if part:IsA("BasePart") and isBodyPart(part.Name) then
-                                cache[#cache + 1] = part
+                                esp.cache[#esp.cache + 1] = part
                             end
                         end
-                        esp.corners = calculateCorners(getBoundingBox(cache))
+                        esp.cache_children = #children
+                    end
+                    if #esp.cache > 0 then
+                        esp.corners = calculateCorners(getBoundingBox(esp.cache))
+                    else
+                        esp.corners = nil
                     end
                     if esp.corners then
                         local box = obj.box
@@ -337,8 +363,15 @@ return function(utility)
                         local cham = plr.chams_object
                         local corners = esp.corners
 
-                        cham.Enabled = settings.chams
-                        if cham.Enabled then
+                        -- Ленивая инициализация chams
+                        if settings.chams and not cham then
+                            plr.chams_object = Instance.new("Highlight", container)
+                            cham = plr.chams_object
+                        end
+                        if cham then
+                            cham.Enabled = settings.chams
+                        end
+                        if cham and cham.Enabled then
                             cham.DepthMode = settings.chams_visible_only and 1 or 0
                             cham.Adornee = esp.character
                             cham.FillColor = settings.chams_fill_color[1]
@@ -431,34 +464,30 @@ return function(utility)
                             weapon.OutlineColor = settings.weapon_outline_color
                             weapon.Position = (corners.bottomLeft + corners.bottomRight) * 0.5
                         end
-                        task.spawn(function()
-                            if (settings.skeleton and esp.character) then
+                        -- Скелет: обновляем реже, без спавна потоков
+                        if settings.skeleton and esp.character then
+                            esp._skel_throttle = (esp._skel_throttle or 0) + 1
+                            if esp._skel_throttle % 6 == 0 then
                                 for _, part in next, esp.character:GetChildren() do
                                     if skeleton_order[part.Name] and esp.character[part.Name] then
                                         local parent_part = skeleton_order[part.Name]
-                                        local part_position, _ = camera:WorldToViewportPoint(part.Position)
-                                        local parent_part_position, _ = camera:WorldToViewportPoint(
-                                            (
-                                                esp.character[parent_part].CFrame
-                                            ).Position
-                                        )
-                                        obj["skeleton_" .. part.Name].From = Vector2.new(part_position.X, part_position
-                                        .Y)
-                                        obj["skeleton_" .. part.Name].To = Vector2.new(parent_part_position.X,
-                                            parent_part_position.Y)
+                                        local part_position = camera:WorldToViewportPoint(part.Position)
+                                        local parent_part_position = camera:WorldToViewportPoint(esp.character[parent_part].CFrame.Position)
+                                        obj["skeleton_" .. part.Name].From = Vector2.new(part_position.X, part_position.Y)
+                                        obj["skeleton_" .. part.Name].To = Vector2.new(parent_part_position.X, parent_part_position.Y)
                                         obj["skeleton_" .. part.Name].Color = settings.skeleton_color[1]
                                         obj["skeleton_" .. part.Name].Transparency = settings.skeleton_color[2]
                                         obj["skeleton_" .. part.Name].Visible = true
                                     end
                                 end
-                            else
-                                for required, _ in next, skeleton_order do
-                                    if (obj["skeleton_" .. required]) then
-                                        obj["skeleton_" .. required].Visible = settings.skeleton
-                                    end
+                            end
+                        else
+                            for required, _ in next, skeleton_order do
+                                if (obj["skeleton_" .. required]) then
+                                    obj["skeleton_" .. required].Visible = false
                                 end
                             end
-                        end)
+                        end
                         if not esp.alive then -- not alive womp womp
                             local fadetime = main_settings.fadetime
                             for _, v in obj do
@@ -467,10 +496,12 @@ return function(utility)
                                     v.Visible = false
                                 end
                             end
-                            cham.FillTransparency = cham.FillTransparency - (delta / fadetime)
-                            cham.OutlineTransparency = cham.OutlineTransparency - (delta / fadetime)
-                            if cham.FillTransparency <= 0 or cham.OutlineTransparency <= 0 then
-                                cham.Enabled = false
+                            if cham then
+                                cham.FillTransparency = cham.FillTransparency - (delta / fadetime)
+                                cham.OutlineTransparency = cham.OutlineTransparency - (delta / fadetime)
+                                if cham.FillTransparency <= 0 or cham.OutlineTransparency <= 0 then
+                                    cham.Enabled = false
+                                end
                             end
                         else
                             box.Transparency = settings.box_color[2]
@@ -484,15 +515,15 @@ return function(utility)
                         end
                     else -- disabled, no corners
                         for _, v in obj do v.Visible = false end
-                        plr.chams_object.Enabled = false
+                        if plr.chams_object then plr.chams_object.Enabled = false end
                     end
                 else -- not on screen
                     for _, v in obj do v.Visible = false end
-                    plr.chams_object.Enabled = false
+                    if plr.chams_object then plr.chams_object.Enabled = false end
                 end
             else -- not here
                 for _, v in obj do v.Visible = false end
-                plr.chams_object.Enabled = false
+                if plr.chams_object then plr.chams_object.Enabled = false end
             end
         end)
     end
@@ -502,7 +533,9 @@ return function(utility)
         table.foreach(loaded_plrs[player].obj, function(i, v)
             v:Remove()
         end)
-        loaded_plrs[player].chams_object:Destroy()
+        if loaded_plrs[player].chams_object then
+            loaded_plrs[player].chams_object:Destroy()
+        end
         loaded_plrs[player] = nil
     end
 
