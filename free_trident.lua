@@ -33,8 +33,8 @@ if not LPH_OBFUSCATED then
     SWG_Private = true
     SWG_Dev = false
     SWG_Version = "free"
-    SWG_Title = 'free swimhub.xyz %s - %s | discord.gg/priv9'
-    SWG_ShortName = 'free'
+    SWG_Title = 'quantuum %s - %s'
+    SWG_ShortName = 'paid'
     SWG_FullName = 'ts'
     SWG_FFA = false
 end;
@@ -1347,7 +1347,7 @@ do
     local leftcolor, rightcolor, watertext = 
     Color3.new(0.000000, 0.666667, 0.333333), 
     Color3.new(0.349020, 0.000000, 1.000000),
-    "swimhub.xyz canary | Jul 28 2024 | fps: 63 ";
+    "quantuum canary | Jul 28 2024 | fps: 63 ";
     local waterpos = Vector2.new(10, 10);
     local text = cheat.utility.new_drawing("Text", {
         ZIndex = 4,
@@ -1555,7 +1555,7 @@ do
         Color = Color3.fromRGB(138, 128, 255),
         ZIndex = 3,
         Transparency = 1,
-        Text = "swimhub.xyz",
+        Text = "quantuum byst",
         Center = true,
         Outline = true,
     })
