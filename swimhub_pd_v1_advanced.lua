@@ -48,13 +48,27 @@ counter = counter + 1
 do
     -- Load local libraries instead of external URLs
     local function safe_load(path)
-        if isfolder and isfolder(path) then
-            error("Expected file but got directory: " .. path)
+        local candidates = {
+            path,
+            "swimhub/" .. path,
+            "swimhub/new/files/" .. path,
+        }
+
+        local resolved
+        for _, candidate in ipairs(candidates) do
+            if isfolder and isfolder(candidate) then
+                -- skip directories
+            elseif isfile and isfile(candidate) then
+                resolved = candidate
+                break
+            end
         end
-        if isfile and not isfile(path) then
+
+        if not resolved then
             error("Missing file: " .. path)
         end
-        local chunk, err = loadstring(readfile(path))
+
+        local chunk, err = loadstring(readfile(resolved))
         assert(chunk, "loadstring failed for " .. path .. ": " .. tostring(err))
         return chunk()
     end
