@@ -55,27 +55,6 @@ do
             "imba/" .. path,
         }
 
-        local function try_find(filename)
-            if not listfiles then return nil end
-            local function walk(dir, depth)
-                depth = depth or 0
-                if depth > 3 then return nil end
-                local ok, items = pcall(listfiles, dir)
-                if not ok or type(items) ~= "table" then return nil end
-                for _, p in ipairs(items) do
-                    if p:sub(-#filename) == filename and isfile and isfile(p) then
-                        return p
-                    end
-                    if isfolder and isfolder(p) then
-                        local found = walk(p, depth + 1)
-                        if found then return found end
-                    end
-                end
-                return nil
-            end
-            return walk("")
-        end
-
         local resolved
         for _, candidate in ipairs(candidates) do
             if isfolder and isfolder(candidate) then
@@ -87,10 +66,7 @@ do
         end
 
         if not resolved then
-            resolved = try_find(path)
-        end
-
-        if not resolved then
+            warn("Missing file: " .. path .. " | tried: " .. table.concat(candidates, ", "))
             error("Missing file: " .. path)
         end
 
