@@ -47,10 +47,22 @@ print('load_' .. tostring(counter))
 counter = counter + 1
 do
     -- Load local libraries instead of external URLs
-    Library, Toggles, Options = loadstring(readfile("library_main.lua"))()
-    ThemeManager = loadstring(readfile("library_theme.lua"))()
-    SaveManager = loadstring(readfile("library_save.lua"))()
-    _esplib = loadstring(readfile("esp_library.lua"))()
+    local function safe_load(path)
+        if isfolder and isfolder(path) then
+            error("Expected file but got directory: " .. path)
+        end
+        if isfile and not isfile(path) then
+            error("Missing file: " .. path)
+        end
+        local chunk, err = loadstring(readfile(path))
+        assert(chunk, "loadstring failed for " .. path .. ": " .. tostring(err))
+        return chunk()
+    end
+
+    Library, Toggles, Options = safe_load("library_main.lua")
+    ThemeManager = safe_load("library_theme.lua")
+    SaveManager = safe_load("library_save.lua")
+    _esplib = safe_load("esp_library.lua")
 end
 print('load_' .. tostring(counter))
 counter = counter + 1
